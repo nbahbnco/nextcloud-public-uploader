@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Data Uploader</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 40px auto; padding: 20px; }
+        h1 { color: #111; }
+        form { background: #f9f9f9; padding: 25px; border-radius: 8px; border: 1px solid #ddd; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; }
+        input[type="file"], textarea { width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        textarea { resize: vertical; }
+        button[type="submit"] { background-color: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
+        button[type="submit"]:hover { background-color: #0056b3; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #progress-container { margin-top: 20px; }
+        .progress-bar-wrapper { margin-bottom: 10px; }
+        .progress-bar { width: 100%; background-color: #f3f3f3; border-radius: 4px; overflow: hidden; }
+        .progress-bar-fill { height: 20px; width: 0%; background-color: #4caf50; text-align: center; line-height: 20px; color: white; transition: width 0.2s; }
+        .progress-bar-label { font-size: 12px; margin-bottom: 3px; }
+        .status { font-weight: bold; }
+        .status-success { color: #155724; }
+        .status-error { color: #721c24; }
+        .status-uploading { color: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>Multi-File Chunked Upload</h1>
+    <p>Select one or more files. Your files will be uploaded in chunks, making the process reliable for large files.</p>
+    
+    <form id="uploadForm">
+        <div>
+            <label for="dataFile">Select file(s):</label>
+            <input type="file" id="dataFile" name="dataFile" required multiple>
+        </div>
+        <div>
+            <label for="dataOrigin">Origin and Description (applies to all files):</label>
+            <textarea id="dataOrigin" name="dataOrigin" rows="6" placeholder="e.g., Data collected from survey X on Y date." required></textarea>
+        </div>
+        <div>
+            <button type="submit" id="submitBtn">Upload Data</button>
+        </div>
+    </form>
+
+    <div id="progress-container"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('uploadForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const progressContainer = document.getElementById('progress-container');
+    const fileInput = document.getElementById('dataFile');
+    const dataOriginInput = document.getElementById('dataOrigin');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const files = fileInput.files;
+        const dataOrigin = dataOriginInput.value;
+
+        if (files.length === 0 || !dataOrigin) {
+            alert('Please select at least one file and provide a description.');
+            return;
+        }
+
+        submitBtn.disabled = true;
+        progressContainer.innerHTML = ''; // Clear previous progress bars
+
+        const uploadPromises = Array.from(files).map(file => uploadFile(file, dataOrigin));
+        
+        try {
+            await Promise.all(uploadPromises);
+            console.log('All files processed.');
+        } catch (error) {
+            console.error('An error occurred during one of the uploads:', error);
+        } finally {
+            submitBtn.disabled = false;
+        }
+    });
+
+    async function uploadFile(file, dataOrigin) {
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        const uploadId = `${file.name}-${file.size}-${Date.now()}`;
+        
+        const { progressBar, statusSpan } = createProgressBar(file.name);
+        
+        statusSpan.textContent = 'Uploading...';
+        statusSpan.className = 'status status-uploading';
+
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const start = chunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            const formData = new FormData();
+            formData.append('dataFile', chunk);
+            formData.append('uploadId', uploadId);
+            formData.append('chunkIndex', chunkIndex);
+            formData.append('totalChunks', totalChunks);
+            formData.append('fileName', file.name);
+
+            try {
+                const response = await fetch('/upload-chunk', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed to upload.`);
+                }
+                
+                const progress = ((chunkIndex + 1) / totalChunks) * 100;
+                progressBar.style.width = `${progress}%`;
+                progressBar.textContent = `${Math.round(progress)}%`;
+
+            } catch (error) {
+                console.error(`Error uploading chunk for ${file.name}:`, error);
+                statusSpan.textContent = `Error: ${error.message}`;
+                statusSpan.className = 'status status-error';
+                return Promise.reject(error); // Stop this file's upload process
+            }
+        }
+
+        // All chunks are sent, now send the complete request
+        try {
+            statusSpan.textContent = 'Assembling file...';
+            const completeResponse = await fetch('/upload-complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploadId: uploadId,
+                    fileName: file.name,
+                    dataOrigin: dataOrigin,
+                }),
+            });
+
+            if (!completeResponse.ok) {
+                 const errorData = await completeResponse.json();
+                 throw new Error(errorData.error || 'Failed to assemble file on server.');
+            }
+
+            const result = await completeResponse.json();
+            statusSpan.textContent = `Success: Saved as ${result.finalFilename}`;
+            statusSpan.className = 'status status-success';
+            progressBar.style.backgroundColor = '#28a745';
+
+        } catch (error) {
+            console.error(`Error completing upload for ${file.name}:`, error);
+            statusSpan.textContent = `Error: ${error.message}`;
+            statusSpan.className = 'status status-error';
+            progressBar.style.backgroundColor = '#dc3545';
+            return Promise.reject(error);
+        }
+    }
+
+    function createProgressBar(fileName) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'progress-bar-wrapper';
+
+        const label = document.createElement('div');
+        label.className = 'progress-bar-label';
+        
+        const fileNameSpan = document.createElement('span');
+        fileNameSpan.textContent = `${fileName} `;
+        
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'status';
+
+        label.appendChild(fileNameSpan);
+        label.appendChild(statusSpan);
+        
+        const barContainer = document.createElement('div');
+        barContainer.className = 'progress-bar';
+        
+        const barFill = document.createElement('div');
+        barFill.className = 'progress-bar-fill';
+        barFill.textContent = '0%';
+        
+        barContainer.appendChild(barFill);
+        wrapper.appendChild(label);
+        wrapper.appendChild(barContainer);
+        progressContainer.appendChild(wrapper);
+
+        return { progressBar: barFill, statusSpan };
+    }
+});
+</script>
+</body>
+</html>

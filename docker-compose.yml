@@ -1,0 +1,23 @@
+services:
+  uploader:
+
+    image: go-uploader-chunked
+    
+
+    
+    container_name: go-uploader-app-chunked
+    
+    restart: unless-stopped
+    
+    ports:
+      - "8080:8080"
+      
+    volumes:
+      - ./tmp/uploads:/app/tmp/uploads
+
+    environment:
+      - NC_URL=${NC_URL}
+      - NC_USER=${NC_USER}
+      - NC_APP_PASSWORD=${NC_APP_PASSWORD}
+      - NC_FOLDER=${NC_FOLDER}
+      - UPLOAD_TEMP_DIR=/app/tmp/uploads
