@@ -1,17 +1,9 @@
 services:
   uploader:
-
-    image: go-uploader-chunked
-    
-
-    
-    container_name: go-uploader-app-chunked
-    
+    image: nbahbnco/nextcloud-public-uploader    
     restart: unless-stopped
-    
     ports:
       - "8080:8080"
-      
     volumes:
       - ./tmp/uploads:/app/tmp/uploads
 
