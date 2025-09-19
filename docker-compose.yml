@@ -1,11 +1,11 @@
 services:
   uploader:
-    image: nbahbnco/nextcloud-public-uploader    
+    image: ghcr.io/nbahbnco/nextcloud-public-uploader
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./tmp/uploads:/app/tmp/uploads
+      - /tmp/nc_uploads:/app/tmp/uploads
 
     environment:
       - NC_URL=${NC_URL}
