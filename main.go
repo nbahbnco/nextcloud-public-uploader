@@ -37,6 +37,7 @@ type CompleteRequest struct {
 
 func main() {
 	// Load configuration from environment variables
+	// TODO: Evaluate a possible configuration file
 	appConfig = Config{
 		NextcloudURL:       getEnv("NC_URL", ""),
 		NextcloudUser:      getEnv("NC_USER", ""),
@@ -70,7 +71,6 @@ func main() {
 	}
 }
 
-// serveForm serves the index.html file.
 func serveForm(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "index.html")
 }
@@ -99,7 +99,7 @@ func handleUploadChunk(w http.ResponseWriter, r *http.Request) {
 	chunkIndex := r.FormValue("chunkIndex")
 
 	// Security: Sanitize uploadID to prevent path traversal attacks.
-	// A real-world app might validate it against a list of active upload IDs.
+	// We do not validate the uploadID against a list of active upload IDs in order to keep the code simple and reduce execution complexity.
 	// For simplicity, we clean the path.
 	cleanUploadID := filepath.Clean(filepath.Base(uploadID))
 	if cleanUploadID == "." || cleanUploadID == ".." {
@@ -193,8 +193,7 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "Error processing chunks.", http.StatusInternalServerError)
 			return
 		}
-		// NOTE: The files will be closed implicitly when the `os.RemoveAll` runs.
-		// For very long-running processes, you'd manage this more carefully.
+// This cleanup is not 100% reliable, it's assumed that it's running in an ephemeral storage. 
 		readers = append(readers, f)
 	}
 
@@ -221,7 +220,7 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// uploadToNextcloud handles the WebDAV PUT request. (Unchanged from original)
+// uploadToNextcloud handles the WebDAV PUT request. 
 func uploadToNextcloud(filename string, data io.Reader) error {
 	webdavURL := fmt.Sprintf(
 		"%s/remote.php/dav/files/%s/%s/%s",
@@ -248,7 +247,7 @@ func uploadToNextcloud(filename string, data io.Reader) error {
 	return nil
 }
 
-// getEnv is a helper to read an env var or return a default. (Unchanged)
+// getEnv is a helper to read an env var or return a default.
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
