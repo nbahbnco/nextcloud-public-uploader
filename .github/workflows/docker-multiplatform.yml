@@ -1,18 +1,14 @@
-name: Docker Build and Publish (Legacy)
+name: Docker Build (Multi-Platform) - Release
 
-# This workflow runs on pushes to the main branch and when a new tag is pushed.
-# NOTE: This is a legacy workflow. Consider using docker-amd64.yml for development
-# and docker-multiplatform.yml for releases instead.
+# This workflow runs only on version tags for production releases
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*.*.*'
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
-  build-and-push:
+  build-and-push-multiplatform:
     # The type of runner that the job will run on.
     runs-on: ubuntu-latest
 
@@ -26,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Set up QEMU for multi-platform builds (optional but good practice).
+      # 2. Set up QEMU for multi-platform builds.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -41,13 +37,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-
-            # Option A: For GitHub Container Registry (ghcr.io)
-            # Option B: For Docker Hub
-            # ${{ secrets.DOCKERHUB_USERNAME }}/nextcloud-public-uploader
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
@@ -57,8 +47,6 @@ jobs:
             org.opencontainers.image.vendor=${{ github.repository_owner }}
 
       # 5. Log in to the container registry.
-
-      # --- OPTION A: Log in to GitHub Container Registry ---
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -66,15 +54,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 6. Build and push the Docker image.
-      # This step uses the tags and labels generated in the metadata step.
-      - name: Build and push Docker image
+      # 6. Build and push the Docker image (Multi-platform for production).
+      - name: Build and push Docker image (Multi-platform)
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64, linux/arm64, linux/riscv64
+          platforms: linux/arm64, linux/riscv64, linux/ppc64le, linux/s390x
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
