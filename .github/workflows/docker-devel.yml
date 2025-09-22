@@ -1,4 +1,4 @@
-name: Docker Build and Publish
+name: Docker Build Devel
 
 on:
   push:
@@ -6,9 +6,7 @@ on:
       - main
 
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
-  # Job 1: Build and push for AMD64 (fastest, most common)
   build-and-push-amd64:
     runs-on: ubuntu-latest
     permissions:
@@ -44,12 +42,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image (AMD64)
+      - name: Build and push Docker image (AMD64) for devel
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64, linux/arm64, linux/riscv64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
