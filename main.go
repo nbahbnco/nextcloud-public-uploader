@@ -32,6 +32,8 @@ var appConfig Config
 type CompleteRequest struct {
 	UploadID   string `json:"uploadId"`
 	FileName   string `json:"fileName"`
+	Email      string `json:"email"`
+	Phone      string `json:"phone"`
 	DataOrigin string `json:"dataOrigin"`
 }
 
@@ -171,20 +173,10 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		return numI < numJ
 	})
 
-	// Create a list of readers: first the metadata, then each chunk
+	// Create a list of readers for the original file content only
 	var readers []io.Reader
 
-	// 1. Metadata Header
-	var headerBuffer bytes.Buffer
-	headerBuffer.WriteString("--- DATA ORIGIN ---\n")
-	headerBuffer.WriteString(fmt.Sprintf("Timestamp (UTC): %s\n", time.Now().UTC().Format(time.RFC3339)))
-	headerBuffer.WriteString(fmt.Sprintf("Original Filename: %s\n", reqData.FileName))
-	headerBuffer.WriteString("Description:\n")
-	headerBuffer.WriteString(reqData.DataOrigin)
-	headerBuffer.WriteString("\n\n--- ORIGINAL FILE CONTENT BEGINS ---\n\n")
-	readers = append(readers, &headerBuffer)
-
-	// 2. Chunks
+	// Read chunks (original file content only)
 	for _, chunkFile := range chunkFiles {
 		path := filepath.Join(chunkDir, chunkFile.Name())
 		f, err := os.Open(path)
@@ -193,34 +185,44 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, "Error processing chunks.", http.StatusInternalServerError)
 			return
 		}
-// This cleanup is not 100% reliable, it's assumed that it's running in an ephemeral storage. 
+		// This cleanup is not 100% reliable, it's assumed that it's running in an ephemeral storage.
 		readers = append(readers, f)
 	}
 
-	// Combine all readers into one
-	combinedReader := io.MultiReader(readers...)
+	// Combine all readers into one for the original file
+	originalFileReader := io.MultiReader(readers...)
 
-	// Upload to Nextcloud
-	finalFilename := fmt.Sprintf("%d-%s", time.Now().Unix(), filepath.Base(reqData.FileName))
-	if err := uploadToNextcloud(finalFilename, combinedReader); err != nil {
+	// Create folder name with timestamp, email, phone, and sanitized filename
+	folderName := createFolderName(reqData.FileName, reqData.Email, reqData.Phone)
+
+	// Upload original file to Nextcloud in its own folder
+	finalFilename := filepath.Base(reqData.FileName)
+	if err := uploadToNextcloudFolder(folderName, finalFilename, originalFileReader); err != nil {
 		log.Printf("ERROR: Nextcloud upload failed for %s: %v", finalFilename, err)
 		jsonError(w, "Failed to upload to Nextcloud.", http.StatusInternalServerError)
 		return
 	}
-	
-	log.Printf("SUCCESS: Assembled and uploaded '%s' as '%s'", reqData.FileName, finalFilename)
+
+	// Create and upload description text file
+	descriptionContent := createDescriptionContent(reqData.FileName, reqData.Email, reqData.Phone, reqData.DataOrigin)
+	descriptionReader := strings.NewReader(descriptionContent)
+	if err := uploadToNextcloudFolder(folderName, "descripcion.txt", descriptionReader); err != nil {
+		log.Printf("ERROR: Failed to upload description file: %v", err)
+		jsonError(w, "Failed to upload description file.", http.StatusInternalServerError)
+		return
+	}
 
 	// Respond with success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"message":       "File uploaded successfully!",
-		"finalFilename": finalFilename,
+		"message":    "File uploaded successfully!",
+		"folderName": folderName,
+		"fileName":   finalFilename,
 	})
 }
 
-
-// uploadToNextcloud handles the WebDAV PUT request. 
+// uploadToNextcloud handles the WebDAV PUT request.
 func uploadToNextcloud(filename string, data io.Reader) error {
 	webdavURL := fmt.Sprintf(
 		"%s/remote.php/dav/files/%s/%s/%s",
@@ -245,6 +247,103 @@ func uploadToNextcloud(filename string, data io.Reader) error {
 		return fmt.Errorf("bad response from Nextcloud: %s (body: %s)", resp.Status, string(body))
 	}
 	return nil
+}
+
+// uploadToNextcloudFolder uploads a file to a specific folder in Nextcloud
+func uploadToNextcloudFolder(folderName, filename string, data io.Reader) error {
+	webdavURL := fmt.Sprintf(
+		"%s/remote.php/dav/files/%s/%s/%s/%s",
+		appConfig.NextcloudURL,
+		appConfig.NextcloudUser,
+		appConfig.NextcloudUploadDir,
+		url.PathEscape(folderName),
+		url.PathEscape(filename),
+	)
+	req, err := http.NewRequest(http.MethodPut, webdavURL, data)
+	if err != nil {
+		return fmt.Errorf("could not create request: %w", err)
+	}
+	req.SetBasicAuth(appConfig.NextcloudUser, appConfig.NextcloudAppPass)
+	client := &http.Client{Timeout: 60 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request execution failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("bad response from Nextcloud: %s (body: %s)", resp.Status, string(body))
+	}
+	return nil
+}
+
+// sanitizeFilename removes or replaces characters that might cause issues in folder names
+func sanitizeFilename(filename string) string {
+	// Remove file extension and replace problematic characters
+	baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
+	// Replace spaces and special characters with underscores
+	baseName = strings.ReplaceAll(baseName, " ", "_")
+	baseName = strings.ReplaceAll(baseName, "/", "_")
+	baseName = strings.ReplaceAll(baseName, "\\", "_")
+	baseName = strings.ReplaceAll(baseName, ":", "_")
+	baseName = strings.ReplaceAll(baseName, "*", "_")
+	baseName = strings.ReplaceAll(baseName, "?", "_")
+	baseName = strings.ReplaceAll(baseName, "\"", "_")
+	baseName = strings.ReplaceAll(baseName, "<", "_")
+	baseName = strings.ReplaceAll(baseName, ">", "_")
+	baseName = strings.ReplaceAll(baseName, "|", "_")
+	return baseName
+}
+
+// createFolderName creates a folder name with timestamp, email, phone, and filename
+func createFolderName(filename, email, phone string) string {
+	timestamp := time.Now().Unix()
+	sanitizedFilename := sanitizeFilename(filename)
+
+	// Sanitize email for folder name (remove @ and replace with _at_)
+	sanitizedEmail := strings.ReplaceAll(email, "@", "_at_")
+	sanitizedEmail = strings.ReplaceAll(sanitizedEmail, ".", "_")
+
+	// Sanitize phone for folder name (remove spaces, dashes, parentheses)
+	sanitizedPhone := strings.ReplaceAll(phone, " ", "")
+	sanitizedPhone = strings.ReplaceAll(sanitizedPhone, "-", "")
+	sanitizedPhone = strings.ReplaceAll(sanitizedPhone, "(", "")
+	sanitizedPhone = strings.ReplaceAll(sanitizedPhone, ")", "")
+	sanitizedPhone = strings.ReplaceAll(sanitizedPhone, "+", "plus")
+
+	// Build folder name components
+	components := []string{fmt.Sprintf("%d", timestamp)}
+
+	// Add email if provided
+	if email != "" {
+		components = append(components, sanitizedEmail)
+	}
+
+	// Add phone if provided
+	if phone != "" {
+		components = append(components, sanitizedPhone)
+	}
+
+	// Add filename
+	components = append(components, sanitizedFilename)
+
+	return strings.Join(components, "-")
+}
+
+// createDescriptionContent creates the content for the description.txt file
+func createDescriptionContent(filename, email, phone, dataOrigin string) string {
+	var buffer bytes.Buffer
+	buffer.WriteString("--- UPLOAD INFORMATION ---\n")
+	buffer.WriteString(fmt.Sprintf("Timestamp (UTC): %s\n", time.Now().UTC().Format(time.RFC3339)))
+	buffer.WriteString(fmt.Sprintf("Original Filename: %s\n", filename))
+	buffer.WriteString(fmt.Sprintf("Email: %s\n", email))
+	if phone != "" {
+		buffer.WriteString(fmt.Sprintf("Teléfono: %s\n", phone))
+	}
+	buffer.WriteString("\n--- DESCRIPCIÓN ---\n")
+	buffer.WriteString(dataOrigin)
+	buffer.WriteString("\n\n--- FIN ---\n")
+	return buffer.String()
 }
 
 // getEnv is a helper to read an env var or return a default.

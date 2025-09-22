@@ -26,20 +26,27 @@
     </style>
 </head>
 <body>
-    <h1>Multi-File Chunked Upload</h1>
-    <p>Select one or more files. Your files will be uploaded in chunks, making the process reliable for large files.</p>
+
     
     <form id="uploadForm">
         <div>
-            <label for="dataFile">Select file(s):</label>
+            <label for="dataFile">Selecciona los archivos:</label>
             <input type="file" id="dataFile" name="dataFile" required multiple>
         </div>
         <div>
-            <label for="dataOrigin">Origin and Description (applies to all files):</label>
-            <textarea id="dataOrigin" name="dataOrigin" rows="6" placeholder="e.g., Data collected from survey X on Y date." required></textarea>
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required placeholder="email@example.com">
         </div>
         <div>
-            <button type="submit" id="submitBtn">Upload Data</button>
+            <label for="phone">Numero de telefono:</label>
+            <input type="tel" id="phone" name="phone" placeholder="600 000 000">
+        </div>
+        <div>
+            <label for="dataOrigin">Origen y Descripción (se aplica a todos los archivos):</label>
+            <textarea id="dataOrigin" name="dataOrigin" rows="6" placeholder="Datos de contacto y motivo" required></textarea>
+        </div>
+        <div>
+            <button type="submit" id="submitBtn">Subir Datos</button>
         </div>
     </form>
 
@@ -51,23 +58,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const submitBtn = document.getElementById('submitBtn');
     const progressContainer = document.getElementById('progress-container');
     const fileInput = document.getElementById('dataFile');
+    const emailInput = document.getElementById('email');
+    const phoneInput = document.getElementById('phone');
     const dataOriginInput = document.getElementById('dataOrigin');
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         
         const files = fileInput.files;
+        const email = emailInput.value;
+        const phone = phoneInput.value;
         const dataOrigin = dataOriginInput.value;
 
-        if (files.length === 0 || !dataOrigin) {
-            alert('Please select at least one file and provide a description.');
+        if (files.length === 0 || !email || !dataOrigin) {
+            alert('Por favor selecciona al menos un archivo, proporciona una dirección de email y una descripción.');
             return;
         }
 
         submitBtn.disabled = true;
         progressContainer.innerHTML = ''; // Clear previous progress bars
 
-        const uploadPromises = Array.from(files).map(file => uploadFile(file, dataOrigin));
+        const uploadPromises = Array.from(files).map(file => uploadFile(file, email, phone, dataOrigin));
         
         try {
             await Promise.all(uploadPromises);
@@ -79,14 +90,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    async function uploadFile(file, dataOrigin) {
+    async function uploadFile(file, email, phone, dataOrigin) {
         const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         const uploadId = `${file.name}-${file.size}-${Date.now()}`;
         
         const { progressBar, statusSpan } = createProgressBar(file.name);
         
-        statusSpan.textContent = 'Uploading...';
+        statusSpan.textContent = 'Subiendo...';
         statusSpan.className = 'status status-uploading';
 
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
@@ -125,13 +136,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // All chunks are sent, now send the complete request
         try {
-            statusSpan.textContent = 'Assembling file...';
+            statusSpan.textContent = 'Ensamblando archivo...';
             const completeResponse = await fetch('upload-complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     uploadId: uploadId,
                     fileName: file.name,
+                    email: email,
+                    phone: phone,
                     dataOrigin: dataOrigin,
                 }),
             });
@@ -142,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const result = await completeResponse.json();
-            statusSpan.textContent = `Success: Saved as ${result.finalFilename}`;
+            statusSpan.textContent = `Éxito: Guardado como ${result.finalFilename}`;
             statusSpan.className = 'status status-success';
             progressBar.style.backgroundColor = '#28a745';
 
