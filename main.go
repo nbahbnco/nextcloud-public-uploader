@@ -192,8 +192,15 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	// Combine all readers into one for the original file
 	originalFileReader := io.MultiReader(readers...)
 
-	// Create folder name with timestamp, email, phone, and sanitized filename
+	// Create folder name with timestamp, email, and phone
 	folderName := createFolderName(reqData.Email, reqData.Phone)
+
+	// Create folder in Nextcloud first
+	if err := createNextcloudFolder(folderName); err != nil {
+		log.Printf("ERROR: Failed to create folder %s: %v", folderName, err)
+		jsonError(w, "Failed to create folder in Nextcloud.", http.StatusInternalServerError)
+		return
+	}
 
 	// Upload original file to Nextcloud in its own folder
 	finalFilename := filepath.Base(reqData.FileName)
@@ -222,27 +229,29 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// uploadToNextcloud handles the WebDAV PUT request.
-func uploadToNextcloud(filename string, data io.Reader) error {
+// createNextcloudFolder creates a folder in Nextcloud using WebDAV MKCOL
+func createNextcloudFolder(folderName string) error {
 	webdavURL := fmt.Sprintf(
 		"%s/remote.php/dav/files/%s/%s/%s",
 		appConfig.NextcloudURL,
 		appConfig.NextcloudUser,
 		appConfig.NextcloudUploadDir,
-		url.PathEscape(filename),
+		url.PathEscape(folderName),
 	)
-	req, err := http.NewRequest(http.MethodPut, webdavURL, data)
+	req, err := http.NewRequest("MKCOL", webdavURL, nil)
 	if err != nil {
 		return fmt.Errorf("could not create request: %w", err)
 	}
 	req.SetBasicAuth(appConfig.NextcloudUser, appConfig.NextcloudAppPass)
-	client := &http.Client{Timeout: 60 * time.Minute}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request execution failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
+
+	// MKCOL returns 201 for created, 405 for already exists, both are OK
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusMethodNotAllowed {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("bad response from Nextcloud: %s (body: %s)", resp.Status, string(body))
 	}
@@ -259,6 +268,7 @@ func uploadToNextcloudFolder(folderName, filename string, data io.Reader) error 
 		url.PathEscape(folderName),
 		url.PathEscape(filename),
 	)
+
 	req, err := http.NewRequest(http.MethodPut, webdavURL, data)
 	if err != nil {
 		return fmt.Errorf("could not create request: %w", err)
@@ -277,12 +287,12 @@ func uploadToNextcloudFolder(folderName, filename string, data io.Reader) error 
 	return nil
 }
 
-// createFolderName creates a folder name with timestamp, email, phone, and filename
+// createFolderName creates a folder name with timestamp, email, and phone (no filename)
 func createFolderName(email, phone string) string {
 	timestamp := time.Now().Unix()
 
 	// Sanitize email for folder name (remove @ and replace with _at_)
-	sanitizedEmail := strings.ReplaceAll(email, "@", "_en_")
+	sanitizedEmail := strings.ReplaceAll(email, "@", "_at_")
 	sanitizedEmail = strings.ReplaceAll(sanitizedEmail, ".", "_")
 
 	// Sanitize phone for folder name (remove spaces, dashes, parentheses)
