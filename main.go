@@ -283,14 +283,11 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	if shouldUploadDescription {
 		// Check if description file already exists
 		if checkDescriptionFileExists(folderName) {
-			log.Printf("INFO: Description file already exists in folder %s, skipping upload", folderName)
 		} else {
-			descriptionContent := createDescriptionContent(reqData.FileName, reqData.Email, reqData.Phone, reqData.DataOrigin)
+			descriptionContent := createDescriptionContent(reqData.Email, reqData.Phone, reqData.DataOrigin)
 			descriptionReader := strings.NewReader(descriptionContent)
 			if err := uploadToNextcloudFolder(folderName, "descripcion.txt", descriptionReader); err != nil {
 				log.Printf("ERROR: Failed to upload description file: %v", err)
-				jsonError(w, "Failed to upload description file.", http.StatusInternalServerError)
-				return
 			}
 			log.Printf("INFO: Uploaded description file for session %s", reqData.SessionID)
 		}
@@ -398,7 +395,7 @@ func createFolderName(email, phone string) string {
 }
 
 // createDescriptionContent creates the content for the description.txt file
-func createDescriptionContent(filename, email, phone, dataOrigin string) string {
+func createDescriptionContent(email, phone, dataOrigin string) string {
 	var buffer bytes.Buffer
 	buffer.WriteString("--- UPLOAD INFORMATION ---\n")
 	buffer.WriteString(fmt.Sprintf("Timestamp (UTC): %s\n", time.Now().UTC().Format(time.RFC3339)))

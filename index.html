@@ -42,7 +42,7 @@
             <input type="tel" id="phone" name="phone" placeholder="600 000 000">
         </div>
         <div>
-            <label for="dataOrigin">Origen y Descripción (se aplica a todos los archivos):</label>
+            <label for="dataOrigin">Descripción:</label>
             <textarea id="dataOrigin" name="dataOrigin" rows="6" placeholder="Datos de contacto y motivo" required></textarea>
         </div>
         <div>
@@ -136,7 +136,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // All chunks are sent, now send the complete request
         try {
-            statusSpan.textContent = 'Ensamblando archivo...';
             const completeResponse = await fetch('upload-complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
