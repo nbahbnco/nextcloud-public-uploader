@@ -3,12 +3,13 @@ name: Docker Build and Publish
 # This workflow runs on pushes to the main branch and when a new tag is pushed.
 # NOTE: This is a legacy workflow. Consider using docker-amd64.yml for development
 # and docker-multiplatform.yml for releases instead.
+name: Release
+
 on:
   push:
-    branches:
-      - main
     tags:
-      - 'v*.*.*'
+      - 'v*'
+
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
