@@ -102,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('fileName', file.name);
 
             try {
-                const response = await fetch('/upload-chunk', {
+                const response = await fetch('upload-chunk', {
                     method: 'POST',
                     body: formData,
                 });
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // All chunks are sent, now send the complete request
         try {
             statusSpan.textContent = 'Assembling file...';
-            const completeResponse = await fetch('/upload-complete', {
+            const completeResponse = await fetch('upload-complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
