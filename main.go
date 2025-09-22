@@ -371,7 +371,7 @@ func createFolderName(email, phone string) string {
 	timestamp := time.Now().Unix()
 
 	// Sanitize email for folder name (remove @ and replace with _at_)
-	sanitizedEmail := strings.ReplaceAll(email, "@", "_at_")
+	sanitizedEmail := strings.ReplaceAll(email, "@", "_en_")
 	sanitizedEmail = strings.ReplaceAll(sanitizedEmail, ".", "_")
 
 	// Sanitize phone for folder name (remove spaces, dashes, parentheses)
@@ -402,7 +402,6 @@ func createDescriptionContent(filename, email, phone, dataOrigin string) string 
 	var buffer bytes.Buffer
 	buffer.WriteString("--- UPLOAD INFORMATION ---\n")
 	buffer.WriteString(fmt.Sprintf("Timestamp (UTC): %s\n", time.Now().UTC().Format(time.RFC3339)))
-	buffer.WriteString(fmt.Sprintf("Original Filename: %s\n", filename))
 	buffer.WriteString(fmt.Sprintf("Email: %s\n", email))
 	if phone != "" {
 		buffer.WriteString(fmt.Sprintf("Teléfono: %s\n", phone))
