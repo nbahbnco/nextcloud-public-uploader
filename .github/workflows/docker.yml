@@ -1,4 +1,4 @@
-name: Docker Build and Publish (Legacy)
+name: Docker Build and Publish
 
 # This workflow runs on pushes to the main branch and when a new tag is pushed.
 # NOTE: This is a legacy workflow. Consider using docker-amd64.yml for development
@@ -12,39 +12,25 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel.
 jobs:
-  build-and-push:
-    # The type of runner that the job will run on.
+  # Job 1: Build and push for AMD64 (fastest, most common)
+  build-and-push-amd64:
     runs-on: ubuntu-latest
-
-    # Grant GITHUB_TOKEN permissions to write to GitHub Packages (GHCR).
     permissions:
       contents: read
       packages: write
 
     steps:
-      # 1. Checkout the repository code.
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Set up QEMU for multi-platform builds (optional but good practice).
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      # 3. Set up Docker Buildx, the advanced builder.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. Extract metadata (tags, labels) for Docker.
-      # This action automatically creates useful tags for your image based on the Git context.
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-
-            # Option A: For GitHub Container Registry (ghcr.io)
-            # Option B: For Docker Hub
-            # ${{ secrets.DOCKERHUB_USERNAME }}/nextcloud-public-uploader
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -56,9 +42,6 @@ jobs:
             org.opencontainers.image.description=Nextcloud Public Uploader
             org.opencontainers.image.vendor=${{ github.repository_owner }}
 
-      # 5. Log in to the container registry.
-
-      # --- OPTION A: Log in to GitHub Container Registry ---
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -66,23 +49,130 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 6. Build and push the Docker image.
-      # This step uses the tags and labels generated in the metadata step.
-      - name: Build and push Docker image
-        id: build-and-push
+      - name: Build and push Docker image (AMD64)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64, linux/arm64, linux/riscv64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Pass version information as build arguments
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.head_commit.timestamp }}
-          # Enable build caching to speed up future builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 2: Build and push for ARM64
+  build-and-push-arm64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=nextcloud-public-uploader
+            org.opencontainers.image.description=Nextcloud Public Uploader
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image (ARM64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 3: Build and push for RISC-V64
+  build-and-push-riscv64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=nextcloud-public-uploader
+            org.opencontainers.image.description=Nextcloud Public Uploader
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image (RISC-V64)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/riscv64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
