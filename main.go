@@ -193,7 +193,7 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 	originalFileReader := io.MultiReader(readers...)
 
 	// Create folder name with timestamp, email, phone, and sanitized filename
-	folderName := createFolderName(reqData.FileName, reqData.Email, reqData.Phone)
+	folderName := createFolderName(reqData.Email, reqData.Phone)
 
 	// Upload original file to Nextcloud in its own folder
 	finalFilename := filepath.Base(reqData.FileName)
@@ -277,31 +277,12 @@ func uploadToNextcloudFolder(folderName, filename string, data io.Reader) error 
 	return nil
 }
 
-// sanitizeFilename removes or replaces characters that might cause issues in folder names
-func sanitizeFilename(filename string) string {
-	// Remove file extension and replace problematic characters
-	baseName := strings.TrimSuffix(filename, filepath.Ext(filename))
-	// Replace spaces and special characters with underscores
-	baseName = strings.ReplaceAll(baseName, " ", "_")
-	baseName = strings.ReplaceAll(baseName, "/", "_")
-	baseName = strings.ReplaceAll(baseName, "\\", "_")
-	baseName = strings.ReplaceAll(baseName, ":", "_")
-	baseName = strings.ReplaceAll(baseName, "*", "_")
-	baseName = strings.ReplaceAll(baseName, "?", "_")
-	baseName = strings.ReplaceAll(baseName, "\"", "_")
-	baseName = strings.ReplaceAll(baseName, "<", "_")
-	baseName = strings.ReplaceAll(baseName, ">", "_")
-	baseName = strings.ReplaceAll(baseName, "|", "_")
-	return baseName
-}
-
 // createFolderName creates a folder name with timestamp, email, phone, and filename
-func createFolderName(filename, email, phone string) string {
+func createFolderName(email, phone string) string {
 	timestamp := time.Now().Unix()
-	sanitizedFilename := sanitizeFilename(filename)
 
 	// Sanitize email for folder name (remove @ and replace with _at_)
-	sanitizedEmail := strings.ReplaceAll(email, "@", "_at_")
+	sanitizedEmail := strings.ReplaceAll(email, "@", "_en_")
 	sanitizedEmail = strings.ReplaceAll(sanitizedEmail, ".", "_")
 
 	// Sanitize phone for folder name (remove spaces, dashes, parentheses)
@@ -323,9 +304,6 @@ func createFolderName(filename, email, phone string) string {
 	if phone != "" {
 		components = append(components, sanitizedPhone)
 	}
-
-	// Add filename
-	components = append(components, sanitizedFilename)
 
 	return strings.Join(components, "-")
 }
