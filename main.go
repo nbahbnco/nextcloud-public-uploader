@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,20 @@ type Config struct {
 // Global config variable
 var appConfig Config
 
+// Upload session tracking
+type UploadSession struct {
+	Email          string
+	Phone          string
+	DataOrigin     string
+	UploadCount    int
+	CompletedCount int
+	Mutex          sync.RWMutex
+}
+
+// Global map to track upload sessions
+var uploadSessions = make(map[string]*UploadSession)
+var sessionsMutex sync.RWMutex
+
 // Struct for the /upload-complete request body
 type CompleteRequest struct {
 	UploadID   string `json:"uploadId"`
@@ -35,6 +50,17 @@ type CompleteRequest struct {
 	Email      string `json:"email"`
 	Phone      string `json:"phone"`
 	DataOrigin string `json:"dataOrigin"`
+	SessionID  string `json:"sessionId"`
+	TotalFiles int    `json:"totalFiles"`
+}
+
+// Struct for the /upload-session request body
+type SessionRequest struct {
+	SessionID  string `json:"sessionId"`
+	Email      string `json:"email"`
+	Phone      string `json:"phone"`
+	DataOrigin string `json:"dataOrigin"`
+	TotalFiles int    `json:"totalFiles"`
 }
 
 func main() {
@@ -63,6 +89,7 @@ func main() {
 	log.Printf("Uploading to Nextcloud instance at: %s", appConfig.NextcloudURL)
 
 	http.HandleFunc("/", serveForm)
+	http.HandleFunc("/upload-session", handleUploadSession)
 	http.HandleFunc("/upload-chunk", handleUploadChunk)
 	http.HandleFunc("/upload-complete", handleUploadComplete)
 
@@ -75,6 +102,39 @@ func main() {
 
 func serveForm(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "index.html")
+}
+
+// handleUploadSession registers a new upload session
+func handleUploadSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqData SessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
+		http.Error(w, "Invalid JSON body.", http.StatusBadRequest)
+		return
+	}
+
+	sessionsMutex.Lock()
+	uploadSessions[reqData.SessionID] = &UploadSession{
+		Email:          reqData.Email,
+		Phone:          reqData.Phone,
+		DataOrigin:     reqData.DataOrigin,
+		UploadCount:    reqData.TotalFiles,
+		CompletedCount: 0,
+	}
+	sessionsMutex.Unlock()
+
+	log.Printf("INFO: Registered upload session %s with %d files", reqData.SessionID, reqData.TotalFiles)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message":   "Upload session registered successfully",
+		"sessionId": reqData.SessionID,
+	})
 }
 
 // handleUploadChunk receives and saves a single file chunk.
@@ -210,13 +270,32 @@ func handleUploadComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create and upload description text file
-	descriptionContent := createDescriptionContent(reqData.FileName, reqData.Email, reqData.Phone, reqData.DataOrigin)
-	descriptionReader := strings.NewReader(descriptionContent)
-	if err := uploadToNextcloudFolder(folderName, "descripcion.txt", descriptionReader); err != nil {
-		log.Printf("ERROR: Failed to upload description file: %v", err)
-		jsonError(w, "Failed to upload description file.", http.StatusInternalServerError)
-		return
+	// Check if this is part of a multi-file session
+	var shouldUploadDescription bool
+	if reqData.SessionID != "" {
+		shouldUploadDescription = checkAndUpdateSession(reqData.SessionID, folderName, reqData.Email, reqData.Phone, reqData.DataOrigin)
+	} else {
+		// Single file upload - always upload description
+		shouldUploadDescription = true
+	}
+
+	// Create and upload description text file only if needed
+	if shouldUploadDescription {
+		// Check if description file already exists
+		if checkDescriptionFileExists(folderName) {
+			log.Printf("INFO: Description file already exists in folder %s, skipping upload", folderName)
+		} else {
+			descriptionContent := createDescriptionContent(reqData.FileName, reqData.Email, reqData.Phone, reqData.DataOrigin)
+			descriptionReader := strings.NewReader(descriptionContent)
+			if err := uploadToNextcloudFolder(folderName, "descripcion.txt", descriptionReader); err != nil {
+				log.Printf("ERROR: Failed to upload description file: %v", err)
+				jsonError(w, "Failed to upload description file.", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("INFO: Uploaded description file for session %s", reqData.SessionID)
+		}
+	} else {
+		log.Printf("INFO: Skipped description file upload for session %s (not all files complete)", reqData.SessionID)
 	}
 
 	// Respond with success
@@ -340,6 +419,59 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// checkAndUpdateSession checks if all files in a session are complete and updates the session
+func checkAndUpdateSession(sessionID, folderName, email, phone, dataOrigin string) bool {
+	sessionsMutex.Lock()
+	defer sessionsMutex.Unlock()
+
+	session, exists := uploadSessions[sessionID]
+	if !exists {
+		log.Printf("WARNING: Session %s not found, treating as single file upload", sessionID)
+		return true
+	}
+
+	session.Mutex.Lock()
+	defer session.Mutex.Unlock()
+
+	session.CompletedCount++
+	log.Printf("INFO: Session %s: %d/%d files completed", sessionID, session.CompletedCount, session.UploadCount)
+
+	if session.CompletedCount >= session.UploadCount {
+		// All files completed - upload description file and clean up session
+		log.Printf("INFO: All files completed for session %s, uploading description file", sessionID)
+		delete(uploadSessions, sessionID)
+		return true
+	}
+
+	// Not all files completed yet
+	return false
+}
+
+// checkDescriptionFileExists checks if a description file already exists in the folder
+func checkDescriptionFileExists(folderName string) bool {
+	webdavURL := fmt.Sprintf(
+		"%s/remote.php/dav/files/%s/%s/%s/descripcion.txt",
+		appConfig.NextcloudURL,
+		appConfig.NextcloudUser,
+		appConfig.NextcloudUploadDir,
+		url.PathEscape(folderName),
+	)
+
+	req, err := http.NewRequest("HEAD", webdavURL, nil)
+	if err != nil {
+		return false
+	}
+	req.SetBasicAuth(appConfig.NextcloudUser, appConfig.NextcloudAppPass)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == http.StatusOK
 }
 
 // jsonError is a helper to return a JSON error response.
