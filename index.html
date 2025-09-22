@@ -155,7 +155,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const result = await completeResponse.json();
-            statusSpan.textContent = `Éxito: Guardado como ${result.finalFilename}`;
             statusSpan.className = 'status status-success';
             progressBar.style.backgroundColor = '#28a745';
 
