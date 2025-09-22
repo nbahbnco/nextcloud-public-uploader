@@ -1,10 +1,5 @@
 name: Docker Build and Publish
 
-# This workflow runs on pushes to the main branch and when a new tag is pushed.
-# NOTE: This is a legacy workflow. Consider using docker-amd64.yml for development
-# and docker-multiplatform.yml for releases instead.
-name: Release
-
 on:
   push:
     tags:
