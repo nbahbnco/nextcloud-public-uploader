@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
                  const errorData = await completeResponse.json();
                  throw new Error(errorData.error || 'Failed to assemble file on server.');
             }
-
+            statusSpan.textContent = 'Completado';
             const result = await completeResponse.json();
             statusSpan.className = 'status status-success';
             progressBar.style.backgroundColor = '#28a745';
